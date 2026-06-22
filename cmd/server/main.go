@@ -1,68 +1,42 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"runtime"
-	"runtime/debug"
-	"time"
+	"os"
+
+	"github.com/kelseyhightower/envconfig"
+	"github.com/task-tracker/internal/db/postgres"
+	"github.com/task-tracker/internal/handler"
+	"github.com/task-tracker/internal/repository"
+	"github.com/task-tracker/internal/service"
 )
 
-var startedAt = time.Now()
-
-type Info struct {
-	GoVersion string `json:"go_version"`
-	Module    string `json:"module"`
-	Version   string `json:"version"`
-
-	CommitHash string `json:"commit_hash"`
-	Revision   string `json:"revision"`
-	Modified   string `json:"modified"`
-
-	StartedAt string `json:"started_at"`
-	Uptime    string `json:"uptime"`
-}
-
 func main() {
-	http.HandleFunc("/debug/info", handleDebugInfo)
+	var cfg postgres.Config
+	if err := envconfig.Process("", &cfg); err != nil {
+		fmt.Printf("failed to process env vars: %v", err)
+	}
+
+	pool, err := postgres.NewPool(&cfg)
+	if err != nil {
+		fmt.Printf("failed to connect to database: %v", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	taskListRepo := repository.NewTaskListRepository(pool)
+	taskListService := service.NewTaskListService(taskListRepo)
+	taskListHandler := handler.NewTaskListHandler(taskListService)
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /debug/info", handler.HandleDebugInfo)
+	mux.HandleFunc("POST /v1/lists", taskListHandler.CreateList)
+	mux.HandleFunc("GET /v1/lists/{list_id}", taskListHandler.GetList)
 
 	fmt.Println("server started at localhost:8080")
 
-	http.ListenAndServe(":8080", nil)
-}
-
-func handleDebugInfo(w http.ResponseWriter, r *http.Request) {
-	info := Info{
-		GoVersion: runtime.Version(),
-		StartedAt: startedAt.Format(time.RFC3339),
-		Uptime:    time.Since(startedAt).String(),
-	}
-
-	if buildInfo, ok := debug.ReadBuildInfo(); ok {
-		info.Module = buildInfo.Main.Path
-		info.Version = buildInfo.Main.Version
-
-		for _, setting := range buildInfo.Settings {
-			switch setting.Key {
-			case "vcs.revision":
-				info.Revision = setting.Value
-				info.CommitHash = setting.Value
-			case "vcs.modified":
-				info.Modified = setting.Value
-			}
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	data, err := json.Marshal(info)
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if _, err := w.Write(data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		_ = fmt.Errorf("failed to start server: %v", err)
 	}
 }
