@@ -1,0 +1,27 @@
+version: '3'
+
+vars:
+  DB_DSN: "user=postgres password=postgres dbname=task_tracker host=localhost port=5432 sslmode=disable"
+  MIGRATIONS: "./migrations"
+
+tasks:
+
+  migrate:up:
+    desc: "Apply all migrations"
+    cmds:
+      - goose -dir {{.MIGRATIONS}} postgres "{{.DB_DSN}}" up
+
+  migrate:down:
+    desc: "Rollback last migration"
+    cmds:
+      - goose -dir {{.MIGRATIONS}} postgres "{{.DB_DSN}}" down
+
+  migrate:status:
+    desc: "Show migration status"
+    cmds:
+      - goose -dir {{.MIGRATIONS}} postgres "{{.DB_DSN}}" status
+
+  migrate:reset:
+    desc: "Rollback all migrations"
+    cmds:
+      - goose -dir {{.MIGRATIONS}} postgres "{{.DB_DSN}}" reset
